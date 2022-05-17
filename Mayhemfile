@@ -1,0 +1,5 @@
+project: rnshah9/re2c
+target: re2c
+
+cmds:
+  - cmd: /repo/re2c @@
