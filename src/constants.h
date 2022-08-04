@@ -2,132 +2,138 @@
 #define _RE2C_CONSTANTS_
 
 #include <stddef.h>
-#include "src/util/c99_stdint.h"
-
+#include <stdint.h>
 
 namespace re2c {
 
-enum target_t {
-    TARGET_CODE,
-    TARGET_DOT,
-    TARGET_SKELETON
+enum class Target: uint32_t {
+    CODE,
+    DOT,
+    SKELETON
 };
 
-enum lang_t {
-    LANG_C,
-    LANG_GO,
-    LANG_RUST
+enum class Lang: uint32_t {
+    C,
+    GO,
+    RUST
 };
 
-enum input_api_t {
-    INPUT_DEFAULT,
-    INPUT_CUSTOM
+enum class Api: uint32_t {
+    DEFAULT,
+    CUSTOM
 };
 
-enum api_style_t {
-    API_FUNCTIONS,
-    API_FREEFORM
+enum class ApiStyle: uint32_t {
+    FUNCTIONS,
+    FREEFORM
 };
 
-enum fixed_tags_t {
-    FIXTAG_NONE,
-    FIXTAG_TOPLEVEL,
-    FIXTAG_ALL
+enum class FixedTags: uint32_t {
+    NONE,
+    TOPLEVEL,
+    ALL
 };
 
-enum parse_opts_t {
-    OK,
-    EXIT_OK,
-    EXIT_FAIL
+enum class InputBlock: uint32_t {
+    END,
+    GLOBAL,
+    LOCAL,
+    USE,
+    RULES
 };
 
-enum InputBlockKind {
-    INPUT_END,
-    INPUT_GLOBAL,
-    INPUT_LOCAL,
-    INPUT_USE,
-    INPUT_RULES,
-    INPUT_ERROR
+enum class EmptyClassPolicy: uint32_t {
+    MATCH_EMPTY, // match on empty input
+    MATCH_NONE,  // fail to match on any input
+    ERROR        // compilation error
 };
 
-enum empty_class_policy_t {
-    EMPTY_CLASS_MATCH_EMPTY, // match on empty input
-    EMPTY_CLASS_MATCH_NONE,  // fail to match on any input
-    EMPTY_CLASS_ERROR        // compilation error
+enum class Minimization: uint32_t {
+    TABLE,
+    MOORE
 };
 
-enum dfa_minimization_t {
-    DFA_MINIMIZATION_TABLE,
-    DFA_MINIMIZATION_MOORE
+// Shortest path algorithm used in construction of POSIX epsilon-closure.
+enum class PosixClosure: uint32_t {
+    GOR1, // Goldberg-Radzik
+    GTOP  // global topological order
 };
 
-enum posix_closure_t {
-    POSIX_CLOSURE_GOR1,
-    POSIX_CLOSURE_GTOP
+// Algorithm for construction of POSIX precedence table for disambiguation.
+// Complexity estimates are in terms of TNFA size (m) and the number of tags (t).
+enum class PosixPrecedenceTable: uint32_t {
+    NAIVE,  // O(m^2 * t)
+    COMPLEX // O(m^2)
 };
 
-enum posix_prectable_alg_t {
-    POSIX_PRECTABLE_NAIVE,
-    POSIX_PRECTABLE_COMPLEX
+// Different kinds of statements / expressions / blocks / etc. used in codegen.
+enum class CodeKind: uint32_t {
+    EMPTY,
+    IF_THEN_ELSE,
+    SWITCH,
+    BLOCK,
+    FUNC,
+    SKIP,
+    PEEK,
+    BACKUP,
+    PEEK_SKIP,
+    SKIP_PEEK,
+    SKIP_BACKUP,
+    BACKUP_SKIP,
+    BACKUP_PEEK,
+    BACKUP_PEEK_SKIP,
+    SKIP_BACKUP_PEEK,
+    LINE_INFO_INPUT,
+    LINE_INFO_OUTPUT,
+    COND_ENUM,
+    COND_GOTO,
+    COND_TABLE,
+    STATE_GOTO,
+    STAGS,
+    MTAGS,
+    MAXFILL,
+    MAXNMATCH,
+    YYCH,
+    YYACCEPT,
+    YYSTATE,
+    VAR,
+    STMT,
+    LOOP,
+    TEXT,
+    TEXT_RAW,
+    RAW,
+    LABEL,
+    ABORT
 };
 
-enum CodeKind {
-    CODE_EMPTY,
-    CODE_IF_THEN_ELSE,
-    CODE_SWITCH,
-    CODE_BLOCK,
-    CODE_FUNC,
-    CODE_SKIP,
-    CODE_PEEK,
-    CODE_BACKUP,
-    CODE_PEEK_SKIP,
-    CODE_SKIP_PEEK,
-    CODE_SKIP_BACKUP,
-    CODE_BACKUP_SKIP,
-    CODE_BACKUP_PEEK,
-    CODE_BACKUP_PEEK_SKIP,
-    CODE_SKIP_BACKUP_PEEK,
-    CODE_LINE_INFO_INPUT,
-    CODE_LINE_INFO_OUTPUT,
-    CODE_COND_ENUM,
-    CODE_COND_GOTO,
-    CODE_COND_TABLE,
-    CODE_STATE_GOTO,
-    CODE_STAGS,
-    CODE_MTAGS,
-    CODE_MAXFILL,
-    CODE_MAXNMATCH,
-    CODE_YYCH,
-    CODE_YYACCEPT,
-    CODE_YYSTATE,
-    CODE_VAR,
-    CODE_STMT,
-    CODE_LOOP,
-    CODE_TEXT,
-    CODE_TEXT_RAW,
-    CODE_RAW,
-    CODE_LABEL,
-    CODE_ABORT
-};
-
-enum VarType {
-    VAR_TYPE_INT,
-    VAR_TYPE_UINT,
-    VAR_TYPE_YYCTYPE
+// Types of variables in codegen (independent of the language language).
+enum class VarType: uint32_t {
+    INT,
+    UINT,
+    YYCTYPE
 };
 
 // Bit flags for configurations used in directives.
-enum DirConf {
+enum DirConf: uint32_t {
     DCONF_FORMAT    = 1u,
     DCONF_SEPARATOR = 2u
 };
 
-static const uint32_t NOEOF = ~0u - 1;
+static constexpr uint32_t NOEOF = ~0u - 1;
 
-static const size_t MAX_NFA_DEPTH  = 1000 * 1000;
-static const size_t MAX_NFA_STATES = 1000 * 1000 * 100;
-static const size_t MAX_DFA_STATES = 1000 * 100;
-static const size_t MAX_DFA_SIZE   = 1000 * 1000 * 50;
+static constexpr size_t MAX_NFA_DEPTH  = 1000 * 1000;
+static constexpr size_t MAX_NFA_STATES = 1000 * 1000 * 100;
+static constexpr size_t MAX_DFA_STATES = 1000 * 100;
+static constexpr size_t MAX_DFA_SIZE   = 1000 * 1000 * 50;
+
+enum class Ret: uint32_t {
+    OK,   // all good
+    EXIT, // all good, but exit immediately (used for options like help or version)
+    FAIL  // failure
+};
+
+#define CHECK_RET(x) do { Ret ret = x; if (ret != Ret::OK) return ret; } while(0)
+#define RET_FAIL(x)  do { x; return Ret::FAIL; } while(0)
 
 } // namespace re2c
 

@@ -2,31 +2,29 @@
 #include "src/parse/input.h"
 #include "src/parse/scanner.h"
 #include "src/util/file_utils.h"
-
+#include "src/util/string_utils.h"
 
 namespace re2c {
 
 Input::Input(size_t fidx)
-    : file(NULL)
-    , name()
-    , path()
-    , escaped_name()
-    , so(Scanner::ENDPOS)
-    , eo(Scanner::ENDPOS)
-    , line(1)
-    , fidx(static_cast<uint32_t>(fidx))
-{}
+    : file(nullptr),
+      name(),
+      path(),
+      escaped_name(),
+      so(Scanner::ENDPOS),
+      eo(Scanner::ENDPOS),
+      line(1),
+      fidx(static_cast<uint32_t>(fidx)) {}
 
-bool Input::open(const std::string &filename, const std::string *parent
-    , const std::vector<std::string> &incpaths)
-{
+Ret Input::open(const std::string& filename,
+                const std::string* parent,
+                const std::vector<std::string>& incpaths) {
     name = filename;
 
     if (!parent) {
         path = name;
         file = name == "<stdin>" ? stdin : fopen(name.c_str(), "rb");
-    }
-    else {
+    } else {
         // first, search relative to the directory of including file
         path = *parent;
         get_dir(path);
@@ -34,8 +32,9 @@ bool Input::open(const std::string &filename, const std::string *parent
         file = fopen(path.c_str(), "rb");
 
         // otherwise search in all include paths
-        for (size_t i = 0; !file && i < incpaths.size(); ++i) {
-            path = incpaths[i] + name;
+        for (const std::string& incpath : incpaths) {
+            if (file != nullptr) break;
+            path = incpath + name;
             file = fopen(path.c_str(), "rb");
         }
 
@@ -46,21 +45,17 @@ bool Input::open(const std::string &filename, const std::string *parent
         }
     }
 
-    if (!file) {
-        error("cannot open file: %s", name.c_str());
-        exit(1);
-    }
+    if (!file) RET_FAIL(error("cannot open file: %s", name.c_str()));
 
     // name displayed in #line directives is the resolved name
     escaped_name = escape_backslashes(path);
 
-    return true;
+    return Ret::OK;
 }
 
-Input::~Input()
-{
-    if (file != NULL && file != stdin) {
-        fclose (file);
+Input::~Input() {
+    if (file != nullptr && file != stdin) {
+        fclose(file);
     }
 }
 

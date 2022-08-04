@@ -17,6 +17,11 @@ if(RE2C_REBUILD_LEXERS AND NOT RE2C_FOR_BUILD)
     message(FATAL_ERROR "option RE2C_FOR_BUILD is required for RE2C_REBUILD_LEXERS")
 endif()
 
+option(RE2C_REBUILD_PARSERS "Regenerate parsers with Bison" OFF)
+if(RE2C_REBUILD_PARSERS AND NOT RE2C_FOR_BUILD)
+    find_package(BISON REQUIRED)
+endif()
+
 option(RE2C_REBUILD_DOCS "Regenerate manpage" OFF)
 if(RE2C_REBUILD_DOCS)
     find_program(RST2MAN NAMES rst2man rst2man.py)
@@ -48,16 +53,17 @@ option(RE2C_BUILD_BENCHMARKS "Build benchmarks" OFF)
 option(RE2C_REGEN_BENCHMARKS "Regenerate C code for benchmarks" OFF)
 
 # checks for programs
-find_package(BISON)
 find_package(Python3 COMPONENTS Interpreter)
+# starting from cmake 3.19 find_package can do version check, but we are on 3.12
+if(Python3_VERSION VERSION_LESS 3.7)
+    message(FATAL_ERROR "python version 3.7 or higher is required")
+endif()
 
 # checks for C++ compiler flags
-set(CMAKE_CXX_STANDARD 98)
+set(CMAKE_CXX_STANDARD 11)
 set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON) # make sure object libraries work with shared libraries
 
-# use system stdint.h if present, otherwise fallback to src/c99_stdint.h
-ac_check_headers("stdint.h")
 # needed for POSIX file API
 ac_check_headers("sys/types.h")
 ac_check_headers("sys/stat.h")
@@ -65,19 +71,6 @@ ac_check_headers("fcntl.h")
 ac_check_headers("unistd.h")
 # windows POSIX-like API
 ac_check_headers("io.h")
-
-# list of possible types to use in typedefs
-ac_check_sizeof("char")
-ac_check_sizeof("short")
-ac_check_sizeof("int")
-ac_check_sizeof("long")
-ac_check_sizeof("long long")
-ac_check_sizeof("__int64")
-ac_check_sizeof("void *")
-# 64-bit integer constant suffix
-ac_check_sizeof("0l")
-ac_check_sizeof("0ll")
-ac_check_sizeof("0i8")
 
 # docs (manpages and help)
 set(re2c_manpage_source       "${CMAKE_CURRENT_BINARY_DIR}/doc/manpage.rst")
@@ -150,7 +143,6 @@ set(re2c_sources
     src/codegen/render.cc
     src/options/opt.cc
     src/options/symtab.cc
-    src/nfa/estimate_size.cc
     src/nfa/re_to_nfa.cc
     src/adfa/adfa.cc
     src/debug/dump_adfa.cc
@@ -176,16 +168,13 @@ set(re2c_sources
     src/dfa/fillpoints.cc
     src/dfa/find_state.cc
     src/dfa/minimization.cc
-    src/dfa/stacmd.cc
     src/dfa/tagver_table.cc
     src/dfa/tcmd.cc
-    src/encoding/ebcdic/ebcdic_regexp.cc
+    src/encoding/ebcdic.cc
     src/encoding/enc.cc
     src/encoding/range_suffix.cc
-    src/encoding/utf8/utf8_regexp.cc
-    src/encoding/utf8/utf8.cc
-    src/encoding/utf16/utf16_regexp.cc
-    src/encoding/utf16/utf16.cc
+    src/encoding/utf8.cc
+    src/encoding/utf16.cc
     src/msg/msg.cc
     src/msg/warn.cc
     src/regexp/ast_to_re.cc
@@ -193,9 +182,7 @@ set(re2c_sources
     src/regexp/fixed_tags.cc
     src/regexp/nullable.cc
     src/regexp/re.cc
-    src/regexp/rule.cc
     src/regexp/split_charset.cc
-    src/regexp/tag.cc
     src/compile.cc
     src/skeleton/control_flow.cc
     src/skeleton/generate_code.cc
@@ -206,10 +193,8 @@ set(re2c_sources
     src/parse/input.cc
     src/parse/parse.cc
     src/parse/scanner.cc
-    src/parse/unescape.cc
     src/util/file_utils.cc
-    src/util/s_to_n32_unsafe.cc
-    src/util/temp_file.cc
+    src/util/string_utils.cc
     src/util/range.cc
     src/main.cc
     $<TARGET_OBJECTS:re2c_objects_autogen>
@@ -222,13 +207,13 @@ add_executable(re2c ${re2c_sources})
 # re2go
 if (RE2C_BUILD_RE2GO)
     add_executable(re2go ${re2c_sources})
-    target_compile_definitions(re2go PUBLIC "RE2C_LANG=LANG_GO")
+    target_compile_definitions(re2go PUBLIC "RE2C_LANG=Lang::GO")
 endif()
 
 # re2rust
 if (RE2C_BUILD_RE2RUST)
     add_executable(re2rust ${re2c_sources})
-    target_compile_definitions(re2rust PUBLIC "RE2C_LANG=LANG_RUST")
+    target_compile_definitions(re2rust PUBLIC "RE2C_LANG=Lang::RUST")
 endif()
 
 re2c_bootstrap_lexer("src/parse/lex.re" "src/parse/lex.cc" "src/parse/lex.h")
@@ -398,11 +383,10 @@ if (CMAKE_SOURCE_DIR STREQUAL PROJECT_SOURCE_DIR)
         src/test/range/test.h
         src/util/range.cc
         src/util/range.h
-        src/util/static_assert.h
     )
     add_executable(re2c_test_s_to_n32_unsafe
         src/test/s_to_n32_unsafe/test.cc
-        src/util/s_to_n32_unsafe.cc
+        src/util/string_utils.cc
     )
     add_executable(re2c_test_ver_to_vernum
         src/test/ver_to_vernum/test.cc
@@ -444,11 +428,11 @@ if (RE2C_BUILD_LIBS)
     )
     re2c_bootstrap_lexer("lib/test_helper.re" "lib/test_helper.cc")
 
-    add_library(libre2c_objects OBJECT
+    set(libre2c_sources
         lib/regcomp.cc
         lib/regexec.cc
         lib/regexec_dfa.cc
-        lib/regexec_dfa_regless.cc
+        lib/regexec_dfa_multipass.cc
         lib/regexec_nfa_leftmost.cc
         lib/regexec_nfa_leftmost_trie.cc
         lib/regexec_nfa_posix.cc
@@ -458,7 +442,6 @@ if (RE2C_BUILD_LIBS)
         lib/regfree.cc
         lib/stubs.cc
         src/parse/ast.cc
-        src/parse/unescape.cc
         src/options/opt.cc
         src/options/symtab.cc
         src/cfg/cfg.cc
@@ -484,18 +467,14 @@ if (RE2C_BUILD_LIBS)
         src/dfa/fillpoints.cc
         src/dfa/find_state.cc
         src/dfa/minimization.cc
-        src/dfa/stacmd.cc
         src/dfa/tagver_table.cc
         src/dfa/tcmd.cc
-        src/nfa/estimate_size.cc
         src/nfa/re_to_nfa.cc
         src/encoding/enc.cc
         src/encoding/range_suffix.cc
-        src/encoding/ebcdic/ebcdic_regexp.cc
-        src/encoding/utf16/utf16.cc
-        src/encoding/utf16/utf16_regexp.cc
-        src/encoding/utf8/utf8.cc
-        src/encoding/utf8/utf8_regexp.cc
+        src/encoding/ebcdic.cc
+        src/encoding/utf16.cc
+        src/encoding/utf8.cc
         src/msg/msg.cc
         src/msg/warn.cc
         src/regexp/ast_to_re.cc
@@ -503,17 +482,12 @@ if (RE2C_BUILD_LIBS)
         src/regexp/fixed_tags.cc
         src/regexp/nullable.cc
         src/regexp/re.cc
-        src/regexp/rule.cc
         src/regexp/split_charset.cc
-        src/regexp/tag.cc
         src/skeleton/control_flow.cc
         src/skeleton/maxpath.cc
         src/skeleton/skeleton.cc
         src/util/range.cc
-        src/util/s_to_n32_unsafe.cc
-    )
-    set(libre2c_sources
-        $<TARGET_OBJECTS:libre2c_objects>
+        src/util/string_utils.cc
         $<TARGET_OBJECTS:libre2c_objects_autogen>
         $<TARGET_OBJECTS:re2c_objects_autogen_ver_to_vernum>
     )

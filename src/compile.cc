@@ -1,5 +1,5 @@
 #include <stddef.h>
-#include "src/util/c99_stdint.h"
+#include <stdint.h>
 #include <algorithm>
 #include <ostream>
 #include <string>
@@ -21,16 +21,13 @@
 #include "src/regexp/re.h"
 #include "src/regexp/rule.h"
 #include "src/skeleton/skeleton.h"
-#include "src/util/free_list.h"
 #include "src/util/range.h"
-
 
 namespace re2c {
 
 class Msg;
 
-static std::string make_name(Output &output, const std::string &cond, const loc_t &loc)
-{
+static std::string make_name(Output& output, const std::string& cond, const loc_t& loc) {
     std::string name;
 
     // if the block is included from another file, prepend filename for disambiguation
@@ -52,56 +49,47 @@ static std::string make_name(Output &output, const std::string &cond, const loc_
     return name;
 }
 
-static smart_ptr<DFA> ast_to_dfa(const spec_t &spec, Output &output)
-{
-    OutputBlock &block = output.block();
-    const opt_t *opts = block.opts;
-    const loc_t &loc = block.loc;
-    Msg &msg = output.msg;
-    const std::vector<ASTRule> &rules = spec.rules;
-    const std::string
-        &cond = spec.name,
-        name = make_name(output, cond, loc),
-        &setup = spec.setup.empty() ? "" : spec.setup[0]->text;
+LOCAL_NODISCARD(Ret ast_to_dfa(
+        const spec_t& spec, Output& output, dfas_t& dfas, DfaAllocator& dfa_alc)) {
+    OutputBlock& block = output.block();
+    const opt_t* opts = block.opts;
+    const loc_t& loc = block.loc;
+    Msg& msg = output.msg;
+    const std::vector<AstRule>& ast = spec.rules;
+    const std::string&cond = spec.name;
+    const std::string name = make_name(output, cond, loc);
+    const std::string& setup = spec.setup.empty() ? "" : spec.setup[0]->text;
 
-    RangeMgr rangemgr;
-
-    RESpec re(rules, opts, msg, rangemgr);
+    // Build a mutable tree representation of a regexp from an immutable AST.
+    RESpec re(opts, msg);
+    CHECK_RET(re.init(ast));
     split_charset(re);
     find_fixed_tags(re);
     insert_default_tags(re);
     warn_nullable(re, cond);
 
-    size_t nfa_size, nfa_depth;
-    compute_size_and_depth(re.res, &nfa_size, &nfa_depth);
-    if (nfa_depth > MAX_NFA_DEPTH) {
-        error("NFA depth exceeds limits");
-        exit(1);
-    } else if (nfa_size > MAX_NFA_STATES) {
-        error("NFA has too many states");
-        exit(1);
-    }
-
-    nfa_t nfa(re, nfa_size);
+    // Transform regexp to TNFA.
+    Tnfa nfa;
+    CHECK_RET(re_to_nfa(nfa, std::move(re)));
     DDUMP_NFA(opts, nfa);
 
-    dfa_t dfa(nfa, spec.def_rule, spec.eof_rule);
-    determinization(nfa, dfa, opts, msg, cond);
+    // Transmorm TNFA to TDFA.
+    Tdfa dfa(dfa_alc, nfa.charset.size(), spec.def_rule, spec.eof_rule);
+    CHECK_RET(determinization(std::move(nfa), dfa, opts, msg, cond));
     DDUMP_DFA_DET(opts, dfa);
 
-    rangemgr.clear();
-
-    // skeleton must be constructed after DFA construction
-    // but prior to any other DFA transformations
+    // Skeleton must be constructed after TDFA construction, but prior to any other TDFA
+    // transformations.
     Skeleton skeleton(dfa, opts, name, cond, loc, msg);
+    CHECK_RET(skeleton.init());
     warn_undefined_control_flow(skeleton);
-    if (opts->target == TARGET_SKELETON) {
-        emit_data(skeleton);
+    if (opts->target == Target::SKELETON) {
+        CHECK_RET(emit_data(skeleton));
     }
 
     cutoff_dead_rules(dfa, opts, cond, msg);
 
-    insert_fallback_tags(opts, dfa);
+    insert_fallback_tags(dfa);
 
     // try to minimize the number of tag variables
     compact_and_optimize_tags(opts, dfa);
@@ -116,9 +104,10 @@ static smart_ptr<DFA> ast_to_dfa(const spec_t &spec, Output &output)
     std::vector<size_t> fill;
     fillpoints(dfa, fill);
 
-    // ADFA stands for 'DFA with actions'
-    DFA *adfa = new DFA(dfa, fill, skeleton.sizeof_key, loc, name, cond,
-        setup, opts, msg);
+    // Transform TDFA to ADFA (DFA with actions, tunnel automaton).
+    DFA* adfa = new DFA(
+            std::move(dfa), fill, skeleton.sizeof_key, loc, name, cond, setup, opts, msg);
+    dfas.push_back(std::unique_ptr<DFA>(adfa));
 
     // see note [reordering DFA states]
     adfa->reorder();
@@ -128,107 +117,106 @@ static smart_ptr<DFA> ast_to_dfa(const spec_t &spec, Output &output)
     DDUMP_ADFA(opts, *adfa);
 
     // gather overall DFA statistics and add it to the output block
-    adfa->calc_stats(block);
+    CHECK_RET(adfa->calc_stats(block));
     block.max_fill = std::max(block.max_fill, adfa->max_fill);
     block.max_nmatch = std::max(block.max_nmatch, adfa->max_nmatch);
     block.used_yyaccept = block.used_yyaccept || adfa->need_accept;
 
-    return make_smart_ptr(adfa);
+    return Ret::OK;
 }
 
-void compile(Scanner &input, Output &output, Opt &opts)
-{
+Ret compile(Scanner& input, Output& output, Opt& opts) {
+    Ast ast;
     RulesBlocks rblocks;
-    const conopt_t *globopts = &opts.glob;
-    code_alc_t &alc = output.allocator;
-    const loc_t &loc0 = input.tok_loc();
+    const conopt_t* globopts = &opts.glob;
+    OutAllocator& out_alc = output.allocator;
+    const loc_t& loc0 = input.tok_loc();
     std::string block_name;
     loc_t block_loc;
 
     output.header_mode(1);
-    output.new_block(opts, INPUT_GLOBAL, block_name, loc0);
+    CHECK_RET(output.new_block(opts, InputBlock::GLOBAL, block_name, loc0));
     output.wversion_time();
 
     output.header_mode(0);
-    output.new_block(opts, INPUT_GLOBAL, block_name, loc0);
+    CHECK_RET(output.new_block(opts, InputBlock::GLOBAL, block_name, loc0));
     output.wversion_time();
-    output.wdelay_stmt(0, code_line_info_input(alc, loc0));
+    output.wdelay_stmt(0, code_line_info_input(out_alc, loc0));
 
-    if (globopts->target == TARGET_SKELETON) {
+    if (globopts->target == Target::SKELETON) {
         output.wdelay_stmt(0, emit_skeleton_prolog(output));
     }
 
-    const opt_t *accum_opts = output.block().opts;
+    const opt_t* accum_opts = output.block().opts;
 
     for (;;) {
         // parse everything up to the next re2c block
-        InputBlockKind kind = input.echo(output, block_name);
-        if (kind == INPUT_ERROR) exit(1);
-        if (kind == INPUT_END) break;
+        InputBlock kind;
+        CHECK_RET(input.echo(output, block_name, kind));
+        if (kind == InputBlock::END) break;
 
         // parse the next re2c block
         specs_t specs;
-        if (kind == INPUT_USE) {
-            const RulesBlock *rb = rblocks.find(block_name);
-            if (rb == NULL) exit(1);
+        if (kind == InputBlock::USE) {
+            const RulesBlock* rb = rblocks.find(block_name);
+            if (rb == nullptr) return Ret::FAIL;
             specs = rb->specs;
-            opts.restore(rb->opts);
+            CHECK_RET(opts.restore(rb->opts));
             output.state_goto = false;
         }
         output.cond_goto = false;
         block_loc = input.tok_loc();
-        parse(input, specs, opts, rblocks);
+        CHECK_RET(parse(input, specs, opts, rblocks, ast));
 
         // start new output block with accumulated options
-        output.new_block(opts, kind, block_name, block_loc);
+        CHECK_RET(output.new_block(opts, kind, block_name, block_loc));
 
-        if (kind == INPUT_RULES) {
+        if (kind == InputBlock::RULES) {
             // save AST and options for future use
             rblocks.add(block_name, output.block().opts, specs);
         } else {
-            check_and_merge_special_rules(specs, output.block().opts, output.msg);
+            CHECK_RET(check_and_merge_special_rules(specs, output.block().opts, output.msg, ast));
 
             // compile AST to DFA
+            DfaAllocator dfa_alc;
             dfas_t dfas;
-            for (specs_t::const_iterator i = specs.begin(); i != specs.end(); ++i) {
-                dfas.push_back(ast_to_dfa(*i, output));
+            for (const spec_t& spec : specs) {
+                CHECK_RET(ast_to_dfa(spec, output, dfas, dfa_alc));
             }
 
             // compile DFA to code
             gen_code(output, dfas);
         }
-        output.wdelay_stmt(0, code_line_info_input(alc, input.cur_loc()));
+        output.wdelay_stmt(0, code_line_info_input(out_alc, input.cur_loc()));
 
         // accumulate whole-program information from this block
         output.gather_info_from_block();
 
-        // Do not accumulate whole-program options for rules/reuse/local blocks.
-        // Global blocks add their named definitions and configurations to the
-        // global scope, local blocks don't. Historically global is the default.
-        if (kind == INPUT_GLOBAL) {
+        // Do not accumulate whole-program options for rules/reuse/local blocks. Global blocks add
+        // their named definitions and configurations to the global scope, local blocks don't.
+        // Historically global is the default.
+        if (kind == InputBlock::GLOBAL) {
             accum_opts = output.block().opts;
         } else {
-            opts.restore(accum_opts);
+            CHECK_RET(opts.restore(accum_opts));
         }
     }
 
     output.total_opts = accum_opts ? accum_opts : rblocks.last_opts();
 
     // For special targets (skeleton and .dot) merge header into the output file.
-    if (globopts->target != TARGET_CODE && output.need_header) {
+    if (globopts->target != Target::CODE && output.need_header) {
         output.need_header = false;
-        blocks_t &cblocks = output.cblocks, &hblocks = output.hblocks;
+        blocks_t& cblocks = output.cblocks, &hblocks = output.hblocks;
         cblocks.insert(cblocks.end(), hblocks.begin(), hblocks.end());
         hblocks.clear();
     }
 
-    if (globopts->target == TARGET_SKELETON) {
+    if (globopts->target == Target::SKELETON) {
         output.wdelay_stmt(0, emit_skeleton_epilog(output));
     }
 
-    AST::flist.clear();
-    SemAct::flist.clear();
-    RangeSuffix::freeList.clear();
+    return Ret::OK;
 }
 
 } // namespace re2c

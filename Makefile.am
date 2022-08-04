@@ -30,20 +30,16 @@ re2c_HDR = \
 	src/dfa/determinization.h \
 	src/dfa/dfa.h \
 	src/dfa/posix_precedence.h \
-	src/dfa/stacmd.h \
 	src/dfa/tag_history.h \
 	src/dfa/tagver_table.h \
 	src/dfa/tcmd.h \
 	src/nfa/nfa.h \
 	src/encoding/case.h \
-	src/encoding/ebcdic/ebcdic.h \
-	src/encoding/ebcdic/ebcdic_regexp.h \
+	src/encoding/ebcdic.h \
 	src/encoding/enc.h \
 	src/encoding/range_suffix.h \
-	src/encoding/utf8/utf8.h \
-	src/encoding/utf8/utf8_regexp.h \
-	src/encoding/utf16/utf16_regexp.h \
-	src/encoding/utf16/utf16.h \
+	src/encoding/utf8.h \
+	src/encoding/utf16.h \
 	src/msg/location.h \
 	src/msg/msg.h \
 	src/msg/ver_to_vernum.h \
@@ -59,27 +55,19 @@ re2c_HDR = \
 	src/parse/input.h \
 	src/parse/parse.h \
 	src/parse/scanner.h \
-	src/parse/unescape.h \
 	src/debug/debug.h \
-	src/util/allocate.h \
+	src/util/allocator.h \
 	src/util/attribute.h \
-	src/util/c99_stdint.h \
+	src/util/containers.h \
+	src/util/check.h \
 	src/util/file_utils.h \
-	src/util/fixed_allocator.h \
 	src/util/forbid_copy.h \
-	src/util/free_list.h \
 	src/util/hash32.h \
-	src/util/local_increment.h \
-	src/util/lookup.h \
+	src/util/nowarn_in_bison.h \
 	src/util/range.h \
-	src/util/s_to_n32_unsafe.h \
-	src/util/slab_allocator.h \
-	src/util/smart_ptr.h \
-	src/util/static_assert.h \
 	src/util/string_utils.h \
-	src/util/temp_file.h \
-	src/util/u32lim.h \
-	src/util/uniq_vector.h
+	src/util/u32lim.h
+
 re2c_SRC = \
 	src/codegen/code_goto.cc \
 	src/codegen/combine.cc \
@@ -94,7 +82,6 @@ re2c_SRC = \
 	src/codegen/render.cc \
 	src/options/opt.cc \
 	src/options/symtab.cc \
-	src/nfa/estimate_size.cc \
 	src/nfa/re_to_nfa.cc \
 	src/adfa/adfa.cc \
 	src/debug/dump_adfa.cc \
@@ -120,16 +107,13 @@ re2c_SRC = \
 	src/dfa/fillpoints.cc \
 	src/dfa/find_state.cc \
 	src/dfa/minimization.cc \
-	src/dfa/stacmd.cc \
 	src/dfa/tagver_table.cc \
 	src/dfa/tcmd.cc \
-	src/encoding/ebcdic/ebcdic_regexp.cc \
+	src/encoding/ebcdic.cc \
 	src/encoding/enc.cc \
 	src/encoding/range_suffix.cc \
-	src/encoding/utf8/utf8_regexp.cc \
-	src/encoding/utf8/utf8.cc \
-	src/encoding/utf16/utf16_regexp.cc \
-	src/encoding/utf16/utf16.cc \
+	src/encoding/utf8.cc \
+	src/encoding/utf16.cc \
 	src/msg/msg.cc \
 	src/msg/warn.cc \
 	src/regexp/ast_to_re.cc \
@@ -137,9 +121,7 @@ re2c_SRC = \
 	src/regexp/fixed_tags.cc \
 	src/regexp/nullable.cc \
 	src/regexp/re.cc \
-	src/regexp/rule.cc \
 	src/regexp/split_charset.cc \
-	src/regexp/tag.cc \
 	src/compile.cc \
 	src/skeleton/control_flow.cc \
 	src/skeleton/generate_code.cc \
@@ -150,10 +132,8 @@ re2c_SRC = \
 	src/parse/input.cc \
 	src/parse/parse.cc \
 	src/parse/scanner.cc \
-	src/parse/unescape.cc \
 	src/util/file_utils.cc \
-	src/util/s_to_n32_unsafe.cc \
-	src/util/temp_file.cc \
+	src/util/string_utils.cc \
 	src/util/range.cc
 re2c_SOURCES = \
 	src/main.cc \
@@ -368,13 +348,8 @@ if REBUILD_LEXERS
 # generate lexer and update bootstrap files
 .re.cc:
 	$(AM_V_at)$(MKDIR_P) $(@D)
-	$(AM_V_GEN)if test -x $(RE2C_FOR_BUILD); \
-	then \
-		$(RE2C_FOR_BUILD) $(RE2CFLAGS) -o $@ $< && \
-		cp $(@:cc=[ch]*) $(top_srcdir)/bootstrap/$(@D); \
-	else \
-		echo "RE2C is not an executable file" && exit 1 ; \
-	fi
+	$(AM_V_GEN)$(RE2C_FOR_BUILD) $(RE2CFLAGS) -o $@ $<
+	$(AM_V_GEN)cp $(@:cc=[ch]*) $(top_srcdir)/bootstrap/$(@D);
 else
 # copy bootstrap files
 .re.cc:
@@ -383,19 +358,19 @@ else
 	$(AM_V_at)echo "Reconfigure with --enable-lexers to regenerate $@"
 endif
 
-# cannot update bootstrap with distcheck (it makes srcdir readonly),
-# so we update bootstrap only on incremental build (if re2c binary exists)
+if REBUILD_PARSERS
+# generate lexer and update bootstrap files
 .ypp.cc:
 	$(AM_V_at)$(MKDIR_P) $(@D)
-	$(AM_V_GEN)if test $(BISON) = "no"; \
-	then \
-		cp $(top_srcdir)/bootstrap/$(@:cc=*) $(@D); \
-	else \
-		$(BISON) --output=$@ --defines=$(@:cc=h) $< && \
-		if test -x $(top_builddir)/re2c$(EXEEXT); then \
-			cp $@ $(@:cc=h) $(top_srcdir)/bootstrap/$(@D); \
-		fi; \
-	fi
+	$(AM_V_GEN)$(BISON) --output=$@ --defines=$(@:cc=h) $<
+	$(AM_V_GEN)cp $@ $(@:cc=h) $(top_srcdir)/bootstrap/$(@D);
+else
+# copy bootstrap files
+.ypp.cc:
+	$(AM_V_at)$(MKDIR_P) $(@D)
+	$(AM_V_GEN)cp $(top_srcdir)/bootstrap/$(@:cc=*) $(@D);
+	$(AM_V_at)echo "Reconfigure with --enable-parsers to regenerate $@"
+endif
 
 # lexer depends on bison-generated header
 $(re2c_GEN_LEX): $(re2c_GEN_PARSER)
@@ -478,13 +453,12 @@ re2c_test_range_SOURCES = \
 	src/test/range/test-impl.h \
 	src/test/range/test.cc \
 	src/test/range/test.h \
-	src/util/range.cc\
-	src/util/range.h \
-	src/util/static_assert.h
+	src/util/range.cc \
+	src/util/range.h
 
 re2c_test_s_to_n32_unsafe_SOURCES = \
 	src/test/s_to_n32_unsafe/test.cc \
-	src/util/s_to_n32_unsafe.cc
+	src/util/string_utils.cc
 
 re2c_test_ver_to_vernum_SOURCES = \
 	src/test/ver_to_vernum/test.cc \
@@ -519,7 +493,7 @@ endif
 # re2go
 if WITH_GOLANG
 bin_PROGRAMS += re2go
-re2go_CXXFLAGS = $(AM_CXXFLAGS) -DRE2C_LANG=LANG_GO
+re2go_CXXFLAGS = $(AM_CXXFLAGS) -DRE2C_LANG=Lang::GO
 re2go_SOURCES = $(re2c_SOURCES)
 nodist_re2go_SOURCES = $(nodist_re2c_SOURCES)
 endif
@@ -527,7 +501,7 @@ endif
 # re2rust
 if WITH_RUST
 bin_PROGRAMS += re2rust
-re2rust_CXXFLAGS = $(AM_CXXFLAGS) -DRE2C_LANG=LANG_RUST
+re2rust_CXXFLAGS = $(AM_CXXFLAGS) -DRE2C_LANG=Lang::RUST
 re2rust_SOURCES = $(re2c_SOURCES)
 nodist_re2rust_SOURCES = $(nodist_re2c_SOURCES)
 endif

@@ -67,7 +67,8 @@ extern int yydebug;
     TOKEN_FID_END = 268,           /* TOKEN_FID_END  */
     TOKEN_LINE_INFO = 269,         /* TOKEN_LINE_INFO  */
     TOKEN_REGEXP = 270,            /* TOKEN_REGEXP  */
-    TOKEN_BLOCK = 271              /* TOKEN_BLOCK  */
+    TOKEN_BLOCK = 271,             /* TOKEN_BLOCK  */
+    TOKEN_ERROR = 272              /* TOKEN_ERROR  */
   };
   typedef enum yytokentype yytoken_kind_t;
 #endif
@@ -76,16 +77,16 @@ extern int yydebug;
 #if ! defined YYSTYPE && ! defined YYSTYPE_IS_DECLARED
 union YYSTYPE
 {
-#line 35 "../src/parse/parser.ypp"
+#line 26 "../src/parse/parser.ypp"
 
-    const re2c::AST *regexp;
-    re2c::SemAct    *semact;
-    char             op;
-    re2c::ASTBounds  bounds;
-    std::string     *str;
-    re2c::CondList  *clist;
+    const re2c::AstNode* regexp;
+    const re2c::SemAct* semact;
+    char op;
+    re2c::AstBounds bounds;
+    const char* cstr;
+    std::string* str;
 
-#line 89 "src/parse/parser.h"
+#line 90 "src/parse/parser.h"
 
 };
 typedef union YYSTYPE YYSTYPE;
@@ -97,7 +98,7 @@ typedef union YYSTYPE YYSTYPE;
 extern YYSTYPE yylval;
 
 
-int yyparse (re2c::context_t &context);
+int yyparse (re2c::context_t& context, re2c::Ast& ast);
 
 
 #endif /* !YY_YY_SRC_PARSE_PARSER_H_INCLUDED  */

@@ -46,6 +46,17 @@ AM_COND_IF([REBUILD_LEXERS], [
 ])
 
 
+# --enable-parsers
+AC_PATH_PROG(BISON, bison, no)
+AC_ARG_ENABLE([parsers], [AS_HELP_STRING([--enable-parsers], [regenerate parsers with Bison])])
+AM_CONDITIONAL([REBUILD_PARSERS], [test "x$enable_parsers" = "xyes"])
+AM_COND_IF([REBUILD_PARSERS], [
+    AS_IF([test "$BISON" = "no" ], [
+        AC_MSG_ERROR([need Bison for --enable-parsers])
+    ])
+])
+
+
 # --enable-libs
 AC_ARG_ENABLE([libs], [AS_HELP_STRING([--enable-libs], [build libraries])])
 AM_CONDITIONAL([WITH_LIBS], [test "x$enable_libs" = "xyes"])
@@ -89,8 +100,7 @@ AM_CONDITIONAL([REGEN_BENCHMARKS],
 
 
 # checks for programs
-AC_PATH_PROG(BISON, bison, no)
-AC_CHECK_PROGS(PYTHON, [python3 python])
+AM_PATH_PYTHON([3.7])
 AC_PROG_CC # used in skeleton tests
 AC_PROG_CXX
 AC_PROG_INSTALL
@@ -120,7 +130,7 @@ AC_DEFUN([TRY_CXXFLAG], [
     AS_VAR_SET([CXXFLAGS], ["$CXXFLAGS_BACKUP"])
     AC_MSG_RESULT([$TRY_CXXFLAG_RESULT])
 ])
-TRY_CXXFLAG([-std=c++98])
+TRY_CXXFLAG([-std=c++11])
 TRY_CXXFLAG([-W])
 TRY_CXXFLAG([-Wall])
 TRY_CXXFLAG([-Wextra])
@@ -131,51 +141,37 @@ TRY_CXXFLAG([-Wredundant-decls])
 TRY_CXXFLAG([-Wsuggest-attribute=format])
 TRY_CXXFLAG([-Wconversion])
 TRY_CXXFLAG([-Wsign-conversion])
+TRY_CXXFLAG([-Wold-style-cast])
 TRY_CXXFLAG([-Werror=return-type])
 TRY_CXXFLAG([-O2])
 TRY_CXXFLAG([-Weverything], m4_join([ ],
     [-Wno-unknown-warning-option], dnl CLANG eats some GCC options only to warn they are unknown
     [-Wno-reserved-id-macro], dnl to allow header guards of the form '_RE2C_PATH_TO_HEADER_BASENAME_'
     [-Wno-padded],
-    [-Wno-old-style-cast], dnl RE2C-generated lexer has lots of C-syle casts because of 're2c:yych:conversion = 1;'
     [-Wno-nested-anon-types],
-    [-Wno-global-constructors] dnl initialization of global constants with std::numeric_limits<...> (mostly for size_t)
+    [-Wno-reserved-identifier], dnl user-defined literals like `_u8` must start with underscore
     [-Wno-shadow-field-in-constructor] dnl using same names in ctor seems more like a feature
-    [-Wno-undefined-func-template])) dnl explicit specialization to reduce build dependencies
+    [-Wno-undefined-func-template] dnl explicit specialization to reduce build dependencies
+    [-Wno-c++98-compat], dnl allow using C++11 features like `nullptr`
+    [-Wno-c++98-compat-pedantic]))
 
 
-# needed by src/c99_stdint.h
-# avoid AC_INCLUDES_DEFAULT
-AC_CHECK_HEADERS([stdint.h],    [], [], [[]])
 # needed for POSIX file API
 AC_CHECK_HEADERS([sys/types.h], [], [], [[]])
 AC_CHECK_HEADERS([sys/stat.h],  [], [], [[]])
 AC_CHECK_HEADERS([fcntl.h],     [], [], [[]])
 AC_CHECK_HEADERS([unistd.h],    [], [], [[]])
 AC_CHECK_HEADERS([io.h],        [], [], [[]]) # windows POSIX-like API
-# list of possible types to use in typedefs
-AC_CHECK_SIZEOF([char],      [], [[]])
-AC_CHECK_SIZEOF([short],     [], [[]])
-AC_CHECK_SIZEOF([int],       [], [[]])
-AC_CHECK_SIZEOF([long],      [], [[]])
-AC_CHECK_SIZEOF([long long], [], [[]])
-AC_CHECK_SIZEOF([__int64],   [], [[]])
-# size of pointers
-AC_CHECK_SIZEOF([void *],    [], [[]])
-# 64-bit integer constant suffix
-AC_CHECK_SIZEOF([0l],        [], [[]])
-AC_CHECK_SIZEOF([0ll],       [], [[]])
-AC_CHECK_SIZEOF([0i8],       [], [[]])
 
 
-AC_CONFIG_FILES([\
-    Makefile \
-    benchmarks/submatch_nfa/Makefile \
-    benchmarks/submatch_dfa_aot/Makefile \
-    benchmarks/submatch_dfa_jit/Makefile \
-    benchmarks/submatch_java/Makefile \
-    doc/manpage.rst \
-    doc/help.rst \
+AC_CONFIG_FILES([
+    Makefile
+    benchmarks/submatch_nfa/Makefile
+    benchmarks/submatch_dfa_aot/Makefile
+    benchmarks/submatch_dfa_jit/Makefile
+    benchmarks/submatch_java/Makefile
+    doc/manpage.rst
+    doc/help.rst
 ])
 AC_CONFIG_FILES([run_tests.py],
     [chmod +x run_tests.py])

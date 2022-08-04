@@ -1,4 +1,4 @@
-#include "src/util/c99_stdint.h"
+#include <stdint.h>
 #include <string>
 
 #include "src/encoding/enc.h"
@@ -7,44 +7,43 @@
 #include "src/parse/ast.h"
 #include "src/parse/scanner.h"
 #include "src/util/file_utils.h"
-#include "src/util/s_to_n32_unsafe.h"
 #include "src/util/string_utils.h"
-
 
 namespace re2c {
 
-#define YYFILL(n) \
-    do { if (!fill(n)) { error("unexpected end of input"); exit(1); }} while(0)
-#define RET_CONF_BOOL(conf) \
-    do { opts.set_##conf(lex_conf_bool()); return; } while(0)
-#define RET_CONF_STR(conf) \
-    do { opts.set_##conf(lex_conf_string()); return; } while(0)
-#define RET_CONF_ENC(enc) \
-    do { opts.set_encoding(enc, lex_conf_bool()); return; } while(0)
-#define RET_CONF_NUM(conf) \
-    do { opts.set_##conf(lex_conf_number()); return; } while(0)
-#define RET_CONF_NUM_NONNEG(conf) \
-    do { \
-        const int32_t n = lex_conf_number(); \
-        if (n < 0) { \
-            msg.error(cur_loc(), "expected nonnegative value in configuration"); \
-            exit(1); \
-        } \
-        opts.set_##conf(static_cast<uint32_t>(n)); \
-        return; \
-    } while(0)
+#define YYFILL(n) if (!fill(n)) RET_FAIL(error("unexpected end of input in configuration"))
+
+#define RET_CONF_BOOL(conf) do { \
+    CHECK_RET(lex_conf_bool(b)); \
+    opts.set_##conf(b); \
+    return Ret::OK; \
+} while(0)
+
+#define RET_CONF_STR(conf) do { \
+    CHECK_RET(lex_conf_string(s)); \
+    opts.set_##conf(s); \
+    return Ret::OK; \
+} while(0)
+
+#define RET_CONF_ENC(enc) do { \
+    CHECK_RET(lex_conf_bool(b)); \
+    opts.set_encoding(enc, b); \
+    return Ret::OK; \
+} while(0)
+
+#define RET_CONF_NUM_NONNEG(conf) do { \
+    CHECK_RET(lex_conf_number(n)); \
+    if (n < 0) RET_FAIL(msg.error(cur_loc(), "expected nonnegative value in configuration")); \
+    opts.set_##conf(static_cast<uint32_t>(n)); \
+    return Ret::OK; \
+} while(0)
 
 /*!re2c
-    re2c:define:YYCTYPE     = "unsigned char";
+    re2c:define:YYCTYPE     = uint8_t;
     re2c:define:YYCURSOR    = cur;
     re2c:define:YYLIMIT     = lim;
     re2c:define:YYMARKER    = mar;
     re2c:define:YYCTXMARKER = ctx;
-
-    // source code is in ASCII: pointers have type 'char *'
-    // but re2c makes an implicit assumption that YYCTYPE is unsigned
-    // when it generates comparisons
-    re2c:yych:conversion = 1;
 
     space       = [ \t];
     conf_assign = space* "=" space*;
@@ -53,24 +52,29 @@ namespace re2c {
     number      = "0" | ("-"? [1-9] [0-9]*);
 */
 
-void Scanner::lex_conf(Opt &opts) {
+Ret Scanner::lex_conf(Opt& opts) {
+    bool b;
+    int32_t n;
+    uint32_t u;
+    std::string s;
+
     tok = cur;
 /*!local:re2c
-    "api" | "flags:input" { lex_conf_input(opts); return; }
-    "api:style"           { lex_conf_api_style(opts); return; }
+    "api" | "flags:input" { return lex_conf_input(opts); }
+    "api:style"           { return lex_conf_api_style(opts); }
     "api:sigil"           { RET_CONF_STR(api_sigil); }
 
     // header filename in configuration is relative to the output file directory
     "header" | "flags:type-header" | "flags:t" {
-        std::string name(lex_conf_string());
+        CHECK_RET(lex_conf_string(s));
         std::string path(opts.glob.output_file);
         get_dir(path);
-        opts.set_header_file(path + name);
-        return;
+        opts.set_header_file(path + s);
+        return Ret::OK;
     }
 
-    "eof"      { opts.set_eof(lex_conf_eof()); return; }
-    "sentinel" { opts.set_sentinel(lex_conf_eof()); return; }
+    "eof"      { CHECK_RET(lex_conf_eof(u)); opts.set_eof(u);      return Ret::OK; }
+    "sentinel" { CHECK_RET(lex_conf_eof(u)); opts.set_sentinel(u); return Ret::OK; }
 
     "yyfill:enable"    { RET_CONF_BOOL(fill_use); }
     "yyfill:parameter" { RET_CONF_BOOL(fill_arg_use); }
@@ -78,10 +82,10 @@ void Scanner::lex_conf(Opt &opts) {
 
     "flags:"? "tags"           | "flags:T" { RET_CONF_BOOL(tags); }
     "flags:"? "posix-captures" | "flags:P" {
-        bool b = lex_conf_bool();
+        CHECK_RET(lex_conf_bool(b));
         opts.set_posix_syntax(b);
         opts.set_posix_semantics(b);
-        return;
+        return Ret::OK;
     }
     "tags:prefix"     { RET_CONF_STR(tags_prefix); }
     "tags:expression" { RET_CONF_STR(tags_expression); }
@@ -131,7 +135,7 @@ void Scanner::lex_conf(Opt &opts) {
     "variable:"? "yych:emit"       { RET_CONF_BOOL(bEmitYYCh); }
     "variable:"  "yybm"            { RET_CONF_STR(yybm); }
     "variable:"? "yybm:hex"        { RET_CONF_BOOL(yybmHexTable); }
-    "variable:"  "yystable"        { lex_conf_string(); return; } // deprecated
+    "variable:"  "yystable"        { return lex_conf_string(s); } // deprecated
 
     "cond:prefix" | "condprefix"         { RET_CONF_STR(condPrefix); }
     "cond:enumprefix" | "condenumprefix" { RET_CONF_STR(condEnumPrefix); }
@@ -153,14 +157,14 @@ void Scanner::lex_conf(Opt &opts) {
     "flags:"? "case-ranges"                   { RET_CONF_BOOL(case_ranges); }
     "flags:"? "unsafe"                        { RET_CONF_BOOL(unsafe); }
 
-    "encoding:ebcdic" | "flags:ecb"        | "flags:e" { RET_CONF_ENC(Enc::EBCDIC); }
-    "encoding:utf32"  | "flags:unicode"    | "flags:u" { RET_CONF_ENC(Enc::UTF32); }
-    "encoding:ucs2"   | "flags:wide-chars" | "flags:w" { RET_CONF_ENC(Enc::UCS2); }
-    "encoding:utf16"  | "flags:utf-16"     | "flags:x" { RET_CONF_ENC(Enc::UTF16); }
-    "encoding:utf8"   | "flags:utf-8"      | "flags:8" { RET_CONF_ENC(Enc::UTF8); }
+    "encoding:ebcdic" | "flags:ecb"        | "flags:e" { RET_CONF_ENC(Enc::Type::EBCDIC); }
+    "encoding:utf32"  | "flags:unicode"    | "flags:u" { RET_CONF_ENC(Enc::Type::UTF32); }
+    "encoding:ucs2"   | "flags:wide-chars" | "flags:w" { RET_CONF_ENC(Enc::Type::UCS2); }
+    "encoding:utf16"  | "flags:utf-16"     | "flags:x" { RET_CONF_ENC(Enc::Type::UTF16); }
+    "encoding:utf8"   | "flags:utf-8"      | "flags:8" { RET_CONF_ENC(Enc::Type::UTF8); }
 
-    "flags:"? "encoding-policy" { lex_conf_encoding_policy(opts); return; }
-    "flags:"? "empty-class"     { lex_conf_empty_class(opts); return; }
+    "flags:"? "encoding-policy" { return lex_conf_encoding_policy(opts); }
+    "flags:"? "empty-class"     { return lex_conf_empty_class(opts); }
 
     "indent:string" { RET_CONF_STR(indString); }
     "indent:top"    { RET_CONF_NUM_NONNEG(topIndent); }
@@ -173,158 +177,145 @@ void Scanner::lex_conf(Opt &opts) {
     "label:start" | "startlabel"                      { RET_CONF_STR(startlabel); }
 
     [a-zA-Z0-9_:-]* {
-        msg.error(tok_loc(), "unrecognized configuration '%.*s'", (int)(cur - tok), tok);
-        exit(1);
+        RET_FAIL(msg.error(
+                tok_loc(), "unrecognized configuration '%.*s'", static_cast<int>(cur - tok), tok));
     }
 */
 }
 
-void Scanner::lex_conf_encoding_policy(Opt &opts)
-{
-    lex_conf_assign ();
+Ret Scanner::lex_conf_encoding_policy(Opt& opts) {
+    CHECK_RET(lex_conf_assign());
 /*!local:re2c
     * {
-        msg.error(cur_loc(),
-            "bad configuration value (expected: 'ignore', 'substitute', 'fail')");
-        exit(1);
+        RET_FAIL(msg.error(cur_loc(),
+                           "bad configuration value (expected: 'ignore', 'substitute', 'fail')"));
     }
-    "ignore"     { opts.set_encoding_policy(Enc::POLICY_IGNORE);     goto end; }
-    "substitute" { opts.set_encoding_policy(Enc::POLICY_SUBSTITUTE); goto end; }
-    "fail"       { opts.set_encoding_policy(Enc::POLICY_FAIL);       goto end; }
+    "ignore"     { opts.set_encoding_policy(Enc::Policy::IGNORE);     goto end; }
+    "substitute" { opts.set_encoding_policy(Enc::Policy::SUBSTITUTE); goto end; }
+    "fail"       { opts.set_encoding_policy(Enc::Policy::FAIL);       goto end; }
 */
 end:
-    lex_conf_semicolon();
+    return lex_conf_semicolon();
 }
 
-void Scanner::lex_conf_input(Opt &opts)
-{
-    lex_conf_assign ();
+Ret Scanner::lex_conf_input(Opt& opts) {
+    CHECK_RET(lex_conf_assign());
 /*!local:re2c
     * {
-        msg.error(cur_loc(),
-            "bad configuration value (expected: 'default', 'custom')");
-        exit(1);
+        RET_FAIL(msg.error(cur_loc(), "bad configuration value (expected: 'default', 'custom')"));
     }
-    "default" { opts.set_input_api(INPUT_DEFAULT); goto end; }
-    "custom"  { opts.set_input_api(INPUT_CUSTOM);  goto end; }
+    "default" { opts.set_input_api(Api::DEFAULT); goto end; }
+    "custom"  { opts.set_input_api(Api::CUSTOM);  goto end; }
 */
 end:
-    lex_conf_semicolon();
+    return lex_conf_semicolon();
 }
 
-void Scanner::lex_conf_empty_class(Opt &opts)
-{
-    lex_conf_assign ();
+Ret Scanner::lex_conf_empty_class(Opt& opts) {
+    CHECK_RET(lex_conf_assign());
 /*!local:re2c
     * {
-        msg.error(cur_loc(),
-            "bad configuration value (expected: 'match-empty', 'match-none', 'error')");
-        exit(1);
+        RET_FAIL(msg.error(cur_loc(),
+                           "bad configuration value (expected: 'match-empty', 'match-none', "
+                           "'error')"));
     }
-    "match-empty" { opts.set_empty_class_policy(EMPTY_CLASS_MATCH_EMPTY); goto end; }
-    "match-none"  { opts.set_empty_class_policy(EMPTY_CLASS_MATCH_NONE);  goto end; }
-    "error"       { opts.set_empty_class_policy(EMPTY_CLASS_ERROR);       goto end; }
+    "match-empty" { opts.set_empty_class_policy(EmptyClassPolicy::MATCH_EMPTY); goto end; }
+    "match-none"  { opts.set_empty_class_policy(EmptyClassPolicy::MATCH_NONE);  goto end; }
+    "error"       { opts.set_empty_class_policy(EmptyClassPolicy::ERROR);       goto end; }
 */
 end:
-    lex_conf_semicolon();
+    return lex_conf_semicolon();
 }
 
-void Scanner::lex_conf_api_style(Opt &opts)
-{
-    lex_conf_assign ();
+Ret Scanner::lex_conf_api_style(Opt& opts) {
+    CHECK_RET(lex_conf_assign());
 /*!local:re2c
     * {
-        msg.error(cur_loc(),
-            "bad configuration value (expected: 'functions', 'free-form')");
-        exit(1);
+        RET_FAIL(msg.error(cur_loc(),
+                           "bad configuration value (expected: 'functions', 'free-form')"));
     }
-    "functions" { opts.set_api_style(API_FUNCTIONS); goto end; }
-    "free-form" { opts.set_api_style(API_FREEFORM);  goto end; }
+    "functions" { opts.set_api_style(ApiStyle::FUNCTIONS); goto end; }
+    "free-form" { opts.set_api_style(ApiStyle::FREEFORM);  goto end; }
 */
 end:
-    lex_conf_semicolon();
+    return lex_conf_semicolon();
 }
 
-void Scanner::lex_conf_assign ()
-{
+Ret Scanner::lex_conf_assign() {
 /*!local:re2c
-    * {
-        msg.error(cur_loc(), "missing '=' in configuration");
-        exit(1);
-    }
-    conf_assign { return; }
+    *           { RET_FAIL(msg.error(cur_loc(), "missing '=' in configuration")); }
+    conf_assign { return Ret::OK; }
 */
 }
 
-void Scanner::lex_conf_semicolon ()
-{
+Ret Scanner::lex_conf_semicolon() {
 /*!local:re2c
-    * {
-        msg.error(cur_loc(), "missing ending ';' in configuration");
-        exit(1);
-    }
-    space* ";" { return; }
+    *          { RET_FAIL(msg.error(cur_loc(), "missing ending ';' in configuration")); }
+    space* ";" { return Ret::OK; }
 */
 }
 
-int32_t Scanner::lex_conf_number ()
-{
-    lex_conf_assign ();
+Ret Scanner::lex_conf_number(int32_t& n) {
+    CHECK_RET(lex_conf_assign());
     tok = cur;
 /*!local:re2c
-    * {
-        msg.error(cur_loc(), "bad configuration value (expected number)");
-        exit(1);
-    }
+    *      { RET_FAIL(msg.error(cur_loc(), "bad configuration value (expected number)")); }
     number {
-        int32_t n = 0;
+        n = 0;
         if (!s_to_i32_unsafe (tok, cur, n)) {
-            msg.error(cur_loc(), "configuration value overflow");
-            exit(1);
+            RET_FAIL(msg.error(cur_loc(), "configuration value overflow"));
         }
-        lex_conf_semicolon ();
-        return n;
+        return lex_conf_semicolon();
     }
 */
 }
 
-std::string Scanner::lex_conf_string ()
-{
-    lex_conf_assign ();
-    std::string s;
+inline Ret Scanner::lex_conf_bool(bool& b) {
+    int32_t n;
+    CHECK_RET(lex_conf_number(n));
+    b = n != 0;
+    return Ret::OK;
+}
+
+Ret Scanner::lex_conf_string(std::string& s) {
+    CHECK_RET(lex_conf_assign());
+    s.clear();
     tok = cur;
 /*!local:re2c
     ['"] {
-        const char quote = tok[0];
+        const uint8_t quote = tok[0];
+        AstChar c;
+        bool stop;
         for (;;) {
-            ASTChar c;
-            if (!lex_str_chr(quote, c)) {
+            CHECK_RET(lex_str_chr(quote, c, stop)); 
+            if (stop) {
                 goto end;
-            }
-            if (c.chr > 0xFF) {
-                msg.error(c.loc
-                    , "multibyte character in configuration string: 0x%X"
-                    , c.chr);
-                exit(1);
+            } else if (c.chr > 0xFF) {
+                RET_FAIL(msg.error(c.loc,
+                                   "multibyte character in configuration string: 0x%X", c.chr));
             } else {
                 s += static_cast<char>(c.chr);
             }
         }
     }
-    naked {
-        s = getstr(tok, cur);
-        goto end;
-    }
-    "" { goto end; }
+    naked { s.assign(tok, cur); goto end; }
+    ""    { goto end; }
 */
 end:
-    lex_conf_semicolon ();
-    return s;
+    return lex_conf_semicolon();
+}
+
+Ret Scanner::lex_conf_eof(uint32_t& u) {
+    int32_t n;
+    CHECK_RET(lex_conf_number(n));
+    u = n < 0 ? NOEOF : static_cast<uint32_t>(n);
+    return Ret::OK;
 }
 
 #undef YYFILL
 #undef RET_CONF_BOOL
 #undef RET_CONF_STR
 #undef RET_CONF_ENC
+#undef RET_CONF_NUM_NONNEG
 
 } // end namespace re2c

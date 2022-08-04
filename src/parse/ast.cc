@@ -1,147 +1,135 @@
 #include <limits>
 
-#include "src/debug/debug.h"
 #include "src/parse/ast.h"
-#include "src/util/free_list.h"
-
+#include "src/util/check.h"
+#include "src/util/string_utils.h"
 
 namespace re2c {
 
-free_list<AST*> AST::flist;
-
-const uint32_t AST::MANY = std::numeric_limits<uint32_t>::max();
-
-AST::AST(const loc_t &l, type_t t)
-    : type(t), loc(l)
-{
-    flist.insert(this);
+AstNode* Ast::make(const loc_t& loc, AstKind kind, bool has_caps) {
+    AstNode* p = allocator.alloct<AstNode>(1);
+    p->kind = kind;
+    p->loc = loc;
+    p->has_caps = has_caps;
+    return p;
 }
 
-AST::~AST()
-{
-    flist.erase(this);
-    if (type == TAG) {
-        delete tag.name;
-    } else if (type == REF) {
-        delete ref.name;
-    } else if (type == STR) {
-        delete str.chars;
-    } else if (type == CLS) {
-        delete cls.ranges;
-    }
+const AstNode* Ast::nil(const loc_t& loc) {
+    return make(loc, AstKind::NIL, false);
 }
 
-const AST *ast_nil(const loc_t &loc)
-{
-    return new AST(loc, AST::NIL);
-}
-
-const AST *ast_str(const loc_t &loc, std::vector<ASTChar> *chars, bool icase)
-{
-    AST *ast = new AST(loc, AST::STR);
-    ast->str.chars = chars;
+const AstNode* Ast::str(const loc_t& loc, bool icase) {
+    AstNode* ast = make(loc, AstKind::STR, false);
+    ast->str.chars.init(temp_chars.data(), temp_chars.size(), allocator);
     ast->str.icase = icase;
+    temp_chars.clear();
     return ast;
 }
 
-const AST *ast_cls(const loc_t &loc, std::vector<ASTRange> *ranges, bool negated)
-{
-    AST *ast = new AST(loc, AST::CLS);
-    ast->cls.ranges = ranges;
+const AstNode* Ast::cls(const loc_t& loc, bool negated) {
+    AstNode* ast = make(loc, AstKind::CLS, false);
+    ast->cls.ranges.init(temp_ranges.data(), temp_ranges.size(), allocator);
     ast->cls.negated = negated;
+    temp_ranges.clear();
     return ast;
 }
 
-const AST *ast_dot(const loc_t &loc)
-{
-    return new AST(loc, AST::DOT);
+const AstNode* Ast::dot(const loc_t& loc) {
+    return make(loc, AstKind::DOT, false);
 }
 
-const AST *ast_default(const loc_t &loc)
-{
-    return new AST(loc, AST::DEFAULT);
+const AstNode* Ast::def(const loc_t& loc) {
+    return make(loc, AstKind::DEF, false);
 }
 
-const AST *ast_alt(const AST *a1, const AST *a2)
-{
+const AstNode* Ast::alt(const AstNode* a1, const AstNode* a2) {
     if (!a1) return a2;
     if (!a2) return a1;
-    AST *ast = new AST(a1->loc, AST::ALT);
+    AstNode* ast = make(a1->loc, AstKind::ALT, a1->has_caps || a2->has_caps);
     ast->alt.ast1 = a1;
     ast->alt.ast2 = a2;
     return ast;
 }
 
-const AST *ast_cat(const AST *a1, const AST *a2)
-{
+const AstNode* Ast::cat(const AstNode* a1, const AstNode* a2) {
     if (!a1) return a2;
     if (!a2) return a1;
-    AST *ast = new AST(a1->loc, AST::CAT);
+    AstNode* ast = make(a1->loc, AstKind::CAT, a1->has_caps || a2->has_caps);
     ast->cat.ast1 = a1;
     ast->cat.ast2 = a2;
     return ast;
 }
 
-const AST *ast_iter(const AST *a, uint32_t n, uint32_t m)
-{
-    DASSERT(n <= m);
-    AST *ast = new AST(a->loc, AST::ITER);
+const AstNode* Ast::iter(const AstNode* a, uint32_t n, uint32_t m) {
+    CHECK(n <= m);
+    AstNode* ast = make(a->loc, AstKind::ITER, a->has_caps);
     ast->iter.ast = a;
     ast->iter.min = n;
     ast->iter.max = m;
     return ast;
 }
 
-const AST *ast_diff(const AST *a1, const AST *a2)
-{
-    AST *ast = new AST(a1->loc, AST::DIFF);
+const AstNode* Ast::diff(const AstNode* a1, const AstNode* a2) {
+    AstNode* ast = make(a1->loc, AstKind::DIFF, a1->has_caps || a2->has_caps);
     ast->cat.ast1 = a1;
     ast->cat.ast2 = a2;
     return ast;
 }
 
-const AST *ast_tag(const loc_t &loc, const std::string *n, bool h)
-{
-    AST *ast = new AST(loc, AST::TAG);
+const AstNode* Ast::tag(const loc_t& loc, const char* n, bool h) {
+    AstNode* ast = make(loc, AstKind::TAG, false);
     ast->tag.name = n;
     ast->tag.history = h;
     return ast;
 }
 
-const AST *ast_cap(const AST *a)
-{
-    AST *ast = new AST(a->loc, AST::CAP);
+const AstNode* Ast::cap(const AstNode* a) {
+    AstNode* ast = make(a->loc, AstKind::CAP, true);
     ast->cap = a;
     return ast;
 }
 
-const AST *ast_ref(const AST *a, const std::string &n)
-{
-    AST *ast = new AST(a->loc, AST::REF);
+const AstNode* Ast::ref(const AstNode* a, const char* n) {
+    AstNode* ast = make(a->loc, AstKind::REF, a->has_caps);
     ast->ref.ast = a;
-    ast->ref.name = new std::string(n);
+    ast->ref.name = n;
     return ast;
 }
 
-bool ast_need_wrap(const AST *a)
-{
-    switch (a->type) {
-        case AST::ITER:
-        case AST::NIL:
-        case AST::STR:
-        case AST::CLS:
-        case AST::DOT:
-        case AST::DEFAULT:
-        case AST::TAG:
-        case AST::CAP:
-            return false;
-        case AST::ALT:
-        case AST::CAT:
-        case AST::DIFF:
-        case AST::REF:
-            return true;
-    }
-    return false; /* unreachable */
+const SemAct* Ast::sem_act(const loc_t& loc, const char* text, const char* cond, bool autogen) {
+    SemAct* a = allocator.alloct<SemAct>(1);
+    a->loc = loc;
+    a->text = text;
+    a->cond = cond;
+    a->autogen = autogen;
+    return a;
 }
+
+const char* Ast::cstr(const uint8_t* s, const uint8_t* e) {
+    return newcstr(s, e, allocator);
+}
+
+bool Ast::needs_wrap(const AstNode* a) {
+    switch (a->kind) {
+    case AstKind::ITER:
+    case AstKind::NIL:
+    case AstKind::STR:
+    case AstKind::CLS:
+    case AstKind::DOT:
+    case AstKind::DEF:
+    case AstKind::TAG:
+    case AstKind::CAP:
+        return false;
+    case AstKind::ALT:
+    case AstKind::CAT:
+    case AstKind::DIFF:
+    case AstKind::REF:
+        return true;
+    }
+    return false; // unreachable
+}
+
+// C++11 requres outer decl for ODR-used static constexpr data members (not needed in C++17).
+constexpr uint32_t Ast::MANY;
 
 } // namespace re2c
